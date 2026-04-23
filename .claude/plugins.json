@@ -1,0 +1,7 @@
+{
+  "$schema": "https://morflight.github.io/claude-plugins/plugins.schema.json",
+  "type": "static-html-tool",
+  "plugins": {
+    "claude-static-html-tool": "*"
+  }
+}

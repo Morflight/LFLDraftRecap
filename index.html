@@ -23,7 +23,33 @@
   }
   h1 { margin: 0 0 4px; }
   h2 { margin: 28px 0 10px; font-size: 18px; }
-  p.lede { color: var(--muted); margin: 0 0 16px; font-size: 13px; }
+  p.lede { color: var(--muted); margin: 0 0 12px; font-size: 13px; }
+  .sync-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding: 6px 10px;
+    background: #f0f0f0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .sync-info #sync-info { flex: 1; min-width: 200px; }
+  .sync-info.error { background: #fbeaea; color: #b32b2b; border-color: #e2a8a8; }
+  .sync-info button {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    background: #fff;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .sync-info button:hover { background: #eee; }
+  .sync-info button:disabled { opacity: 0.5; cursor: wait; }
+  .sync-info code { background: #e4e4e4; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
   .controls {
     display: flex;
     gap: 8px;
@@ -49,6 +75,7 @@
     font-size: 13px;
   }
   .controls button:hover { background: #eee; }
+  .controls button:disabled { opacity: 0.5; cursor: not-allowed; }
   #status {
     margin-bottom: 12px;
     font-size: 13px;
@@ -102,18 +129,102 @@
     font-size: 12px;
     color: var(--muted);
   }
+  .update-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding: 6px 10px;
+    background: #f5f0e6;
+    border: 1px solid #d8cbb0;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--ink);
+  }
+  .update-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: #fff;
+    border: 1px solid #e0d6bf;
+    border-radius: 4px;
+  }
+  .update-group-label {
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+  }
+  .update-bar input[type="date"] {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    background: #fff;
+  }
+  .update-bar button {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    background: #fff;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .update-bar button:hover { background: #f4f4f4; }
+  .update-bar button:disabled { opacity: 0.5; cursor: wait; }
+  .update-bar select {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    background: #fff;
+    cursor: pointer;
+  }
+  .update-bar #update-status { flex: 1; min-width: 160px; color: var(--muted); }
+  .update-bar #update-status.err { color: #b32b2b; }
+  .update-bar #update-status.ok  { color: #2a7a2a; }
 </style>
 </head>
 <body>
   <h1>LFL Draft Recap</h1>
   <p class="lede">
-    Entre un nom d'équipe LeaguePedia. L'outil charge sa page Pick-Ban History + les Scoreboard Players,
-    puis rend la grille de drafts et l'agrégat "Competitive picks" par joueur.
+    Tool headless : toutes les données vivent dans ton navigateur (<code>localStorage</code>).
+    Deux façons d'alimenter la base : <strong>📡 Fandom</strong> (récupère un jour en direct) ou
+    <strong>💾 Base locale → Remplacer par un fichier</strong> (charge un JSON généré par
+    <code>make sync</code> ou reçu du coach). L'export produit un fichier JSON échangeable : tu
+    l'envoies au coach, il le charge dans son navigateur, il voit exactement les mêmes données.
   </p>
 
+  <div id="sync-bar" class="sync-info">
+    <span id="sync-info">Chargement des données locales…</span>
+    <button id="sync-btn" type="button" title="Recharger la page pour relire data/lfl-2026.js. Lance `make sync` au préalable côté terminal pour obtenir des données fraîches.">↻ Recharger</button>
+  </div>
+
+  <div class="update-bar">
+    <span class="update-group" title="Interroge LeaguePedia en direct pour récupérer les games de ce jour-là. Ajoute les résultats à la base locale. Chaque jour n'est récupéré qu'une seule fois.">
+      <span class="update-group-label">📡 Fandom</span>
+      <input id="update-date" type="date" />
+      <button id="update-btn" type="button">Récupérer ce jour</button>
+    </span>
+    <span class="update-group" title="Gestion de la base locale (localStorage). L'export est un fichier JSON partageable avec le coach ; il l'importe dans son navigateur pour voir les mêmes données.">
+      <span class="update-group-label">💾 Base locale</span>
+      <select id="nav-menu">
+        <option value="">Gérer…</option>
+        <option value="export">⬇ Sauvegarder dans un fichier</option>
+        <option value="import">⬆ Remplacer par un fichier</option>
+        <option value="clear">🗑 Effacer</option>
+      </select>
+    </span>
+    <input id="nav-import-file" type="file" accept=".json,application/json" hidden />
+    <span id="update-status"></span>
+  </div>
+
   <div class="controls">
-    <label>Équipe LFL
-      <select id="team-select" disabled><option>(chargement liste...)</option></select>
+    <label>Équipe
+      <select id="team-select" disabled><option>(chargement…)</option></select>
     </label>
     <label>ou autre
       <input id="team" type="text" placeholder="ex: G2 Esports" />
@@ -121,7 +232,7 @@
     <label>Tournoi
       <select id="tournament" disabled><option>(charger d'abord)</option></select>
     </label>
-    <button id="load">Charger</button>
+    <button id="load">Afficher</button>
   </div>
 
   <div id="status"></div>
@@ -139,8 +250,6 @@
 <script>
 'use strict';
 
-const API = 'https://lol.fandom.com/api.php';
-
 const COLORS = {
   pickBlue:  '#c9ddf4',
   pickRed:   '#f4c9c9',
@@ -151,172 +260,459 @@ const COLORS = {
   aggFirst:  '#f9d8bc',
 };
 
-// Layout rows — matches the reference template exactly.
+// Draft grid layout — matches the reference template exactly.
 // Each entry is { blue, red } draft slots, or type 'sep' for a blank separator.
 // Slot: { kind: 'ban'|'pick', n: 1..5 }. Phase = 1 (n<=3) or 2 (n>=4).
 const LAYOUT = [
   { blue:{kind:'ban', n:1}, red:{kind:'ban', n:1} },
   { blue:{kind:'ban', n:2}, red:{kind:'ban', n:2} },
   { blue:{kind:'ban', n:3}, red:{kind:'ban', n:3} },
-  { blue:{kind:'pick',n:1}, red:{kind:'pick',n:1} },
-  { blue:null,              red:{kind:'pick',n:2} },
-  { sep:true },
-  { blue:{kind:'pick',n:2}, red:null },
-  { blue:{kind:'pick',n:3}, red:null },
-  { sep:true },
-  { blue:null,              red:{kind:'pick',n:3} },
-  { sep:true },
+  { blue:{kind:'pick',n:1}, red:null              },   // BP1 — first pick of the game
+  { blue:null,              red:{kind:'pick',n:1} },   // RP1
+  { blue:null,              red:{kind:'pick',n:2} },   // RP2
+  { blue:{kind:'pick',n:2}, red:null              },   // BP2
+  { blue:{kind:'pick',n:3}, red:null              },   // BP3
+  { blue:null,              red:{kind:'pick',n:3} },   // RP3
   { blue:{kind:'ban', n:4}, red:{kind:'ban', n:4} },
   { blue:{kind:'ban', n:5}, red:{kind:'ban', n:5} },
-  { blue:null,              red:{kind:'pick',n:4} },
-  { sep:true },
-  { blue:{kind:'pick',n:4}, red:null },
-  { blue:{kind:'pick',n:5}, red:null },
-  { blue:null,              red:{kind:'pick',n:5} },
-];
-
-// Standard competitive draft sequence — 20 slots in chronological order.
-// Used to index data-c1/data-c2 champions from the pbh-table row.
-const DRAFT_SEQUENCE = [
-  {kind:'ban', side:'B', n:1}, {kind:'ban', side:'R', n:1},
-  {kind:'ban', side:'B', n:2}, {kind:'ban', side:'R', n:2},
-  {kind:'ban', side:'B', n:3}, {kind:'ban', side:'R', n:3},
-  {kind:'pick',side:'B', n:1}, {kind:'pick',side:'R', n:1},
-  {kind:'pick',side:'R', n:2}, {kind:'pick',side:'B', n:2},
-  {kind:'pick',side:'B', n:3}, {kind:'pick',side:'R', n:3},
-  {kind:'ban', side:'R', n:4}, {kind:'ban', side:'B', n:4},
-  {kind:'ban', side:'R', n:5}, {kind:'ban', side:'B', n:5},
-  {kind:'pick',side:'R', n:4}, {kind:'pick',side:'B', n:4},
-  {kind:'pick',side:'B', n:5}, {kind:'pick',side:'R', n:5},
+  { blue:null,              red:{kind:'pick',n:4} },   // RP4
+  { blue:{kind:'pick',n:4}, red:null              },   // BP4
+  { blue:{kind:'pick',n:5}, red:null              },   // BP5
+  { blue:null,              red:{kind:'pick',n:5} },   // RP5
 ];
 
 const ROLE_ORDER = ['Top', 'Jungle', 'Mid', 'Bot', 'Support'];
 
-const CURRENT_SPLIT = 'LFL/2026 Season/Spring Split';
+// ----- DOM refs + state -----
 
 const $ = (s) => document.querySelector(s);
 const statusEl = $('#status');
+const syncBarEl = $('#sync-bar');
+const syncInfoEl = $('#sync-info');
+const syncBtnEl = $('#sync-btn');
 const tournamentEl = $('#tournament');
 const teamSelectEl = $('#team-select');
 const teamInputEl = $('#team');
+const loadBtnEl = $('#load');
+const updateDateEl = $('#update-date');
+const updateBtnEl = $('#update-btn');
+const updateStatusEl = $('#update-status');
 
-let gamesAll = [];
-let playersRows = [];
+let splitData = null;   // { at, seasonLabel, teams, games, players } — base + additions merged
+let gamesAll = [];      // filtered: games for loadedTeam
+let playersRows = [];   // filtered: SP rows for loadedTeam
 let loadedTeam = '';
-let lastSpError = null;
 
-$('#load').addEventListener('click', onLoad);
+loadBtnEl.addEventListener('click', onLoad);
+syncBtnEl.addEventListener('click', () => location.reload());
 tournamentEl.addEventListener('change', renderAll);
 teamSelectEl.addEventListener('change', () => { teamInputEl.value = teamSelectEl.value; });
 $('#copy-all').addEventListener('click', (e) => copyAll(e.currentTarget));
+updateBtnEl.addEventListener('click', onImportDay);
+$('#nav-menu').addEventListener('change', onNavMenuAction);
+$('#nav-import-file').addEventListener('change', onNavFileSelected);
+updateDateEl.max = new Date().toISOString().slice(0, 10);
+updateDateEl.value = updateDateEl.max;
 
-const TEAMS_CACHE_KEY = 'lfl-draft-recap:teams:' + CURRENT_SPLIT;
-const TEAMS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+// ----- data loading -----
+//
+// Headless viewer: everything lives in localStorage under BLOB_KEY. No
+// `<script src>` base layer, no fetch. Bootstrap via the "Importer
+// depuis fichier" menu (typically pointing at the file generated by
+// `make sync` → scripts/sync.py), or a day at a time via the date
+// picker. The on-disk shape and the localStorage shape are identical:
+//   { at, importedDays, games, players }
 
-function populateTeams(teams) {
-  if (!teams || !teams.length) {
-    teamSelectEl.innerHTML = '<option>(liste indisponible)</option>';
-    return;
-  }
-  teamSelectEl.innerHTML = '<option value="">(choisir...)</option>' +
-    teams.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  teamSelectEl.disabled = false;
-}
+const BLOB_KEY = 'lfl-draft-recap:blob';
+const SEASON_LABEL = 'LFL 2026';
+const SEASON_LIKE = 'LFL/2026 Season/%';
 
-function readTeamsCache() {
+function readBlob() {
   try {
-    const raw = localStorage.getItem(TEAMS_CACHE_KEY);
-    if (!raw) return null;
-    const { at, teams } = JSON.parse(raw);
-    if (Date.now() - at > TEAMS_CACHE_TTL_MS) return null;
-    return teams;
-  } catch { return null; }
+    const raw = localStorage.getItem(BLOB_KEY);
+    if (!raw) return emptyBlob();
+    const parsed = JSON.parse(raw);
+    return {
+      at: parsed.at || 0,
+      importedDays: new Set(parsed.importedDays || []),
+      games: parsed.games || [],
+      players: parsed.players || [],
+    };
+  } catch { return emptyBlob(); }
 }
-function writeTeamsCache(teams) {
+function writeBlob(blob) {
   try {
-    localStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify({ at: Date.now(), teams }));
-  } catch {}
+    localStorage.setItem(BLOB_KEY, JSON.stringify({
+      at: blob.at || Date.now(),
+      importedDays: [...blob.importedDays].sort(),
+      games: blob.games,
+      players: blob.players,
+    }));
+  } catch (e) { console.warn('writeBlob failed', e); }
+}
+function emptyBlob() {
+  return { at: 0, importedDays: new Set(), games: [], players: [] };
 }
 
-async function fetchTeamsList() {
-  // Try TournamentRosters first, fall back to distinct teams from ScoreboardGames.
-  const base = `${API}?action=cargoquery&format=json&origin=*`;
-  const where = encodeURIComponent(`OverviewPage="${CURRENT_SPLIT}"`);
-  const tryUrl = async (url) => {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const r = await fetch(url);
-      const data = await r.json().catch(() => ({}));
-      if (data.error && data.error.code === 'ratelimited') {
-        await new Promise(res => setTimeout(res, 1500 * (attempt + 1)));
-        continue;
-      }
-      return data.cargoquery || [];
-    }
-    throw new Error('rate-limit persistant');
+function gameKey(g) { return `${g.blueTeam}|${g.redTeam}|${g.date}`; }
+function playerKey(p) { return `${p.GameId || ''}|${p.Link || ''}|${p.Champion || ''}|${p.Role || ''}`; }
+
+// Derive the in-memory splitData view (adds `teams` + `seasonLabel` on
+// top of the stored blob). Call after every mutation.
+function loadSplitData() {
+  const blob = readBlob();
+  const teamSet = new Set(blob.games.flatMap(g => [g.blueTeam, g.redTeam]).filter(Boolean));
+  return {
+    seasonLabel: SEASON_LABEL,
+    at: blob.at,
+    teams: [...teamSet].sort(),
+    games: blob.games,
+    players: blob.players,
+    importedDays: blob.importedDays,
   };
-  const rosters = await tryUrl(`${base}&tables=TournamentRosters&fields=Team&where=${where}`);
-  let teams = rosters.map(x => x.title.Team).filter(Boolean);
-  if (!teams.length) {
-    const games = await tryUrl(`${base}&tables=ScoreboardGames&fields=Team1,Team2&where=${where}&limit=200`);
-    const set = new Set();
-    for (const g of games) { if (g.title.Team1) set.add(g.title.Team1); if (g.title.Team2) set.add(g.title.Team2); }
-    teams = Array.from(set);
-  }
-  return Array.from(new Set(teams)).sort();
 }
 
-(async function initTeams() {
-  const cached = readTeamsCache();
-  if (cached) populateTeams(cached);
-  else teamSelectEl.innerHTML = '<option>(chargement...)</option>';
-  try {
-    const teams = await fetchTeamsList();
-    if (teams.length) {
-      writeTeamsCache(teams);
-      populateTeams(teams);
-    } else if (!cached) {
-      teamSelectEl.innerHTML = '<option>(aucune équipe — Fandom vide pour ' + esc(CURRENT_SPLIT) + ')</option>';
-    }
-  } catch (e) {
-    console.warn('LFL teams fetch failed', e);
-    if (!cached) teamSelectEl.innerHTML = '<option>(Fandom rate-limit — réessaie dans 1 min)</option>';
+(function init() {
+  splitData = loadSplitData();
+  populateTeams(splitData.teams);
+  updateSyncInfo();
+  setControlsDisabled(false);
+  if (!splitData.games.length) {
+    setStatus('Base locale vide — charge un fichier (💾 Base locale → Remplacer par un fichier) ou récupère un jour (📡 Fandom).');
+  } else {
+    setStatus(`Prêt — ${splitData.games.length} games · ${splitData.players.length} player rows. Sélectionne une équipe.`);
   }
 })();
 
-async function onLoad() {
-  const team = (teamInputEl.value || teamSelectEl.value).trim();
-  if (!team) { setStatus("Choisis une équipe ou entre un nom.", true); return; }
-  loadedTeam = team;
-  setStatus(`Chargement de ${team}...`);
-  clearOutput();
-  lastSpError = null;
-  try {
-    const html = await fetchPickBanHistory(team);
-    gamesAll = parsePickBanTable(html);
-    if (!gamesAll.length) { setStatus('Aucune game trouvée.', true); return; }
-    setStatus(`${gamesAll.length} games chargées. Fetching player-picks...`);
-    const pages = Array.from(new Set(gamesAll.map(g => g.overviewPage).filter(Boolean)));
-    try {
-      playersRows = await fetchScoreboardPlayers(team, pages);
-    } catch (err) {
-      playersRows = [];
-      lastSpError = err;
-      console.warn('ScoreboardPlayers failed:', err);
+// ----- browser-side Cargo client for on-demand day imports -----
+//
+// Same pattern as scripts/sync.py: serial queue, long pacing between
+// requests, retry with backoff on `ratelimited`. The browser hits the
+// same public Cargo API so the same rate-limit constraints apply.
+
+const API = 'https://lol.fandom.com/api.php';
+const CARGO_GAP_MS = 60000;
+const RETRY_WAIT_MS = [60000, 300000];
+let cargoQueue = Promise.resolve();
+
+class RateLimitError extends Error {
+  constructor(msg) { super(msg); this.name = 'RateLimitError'; }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function cargoQuery(params, { onRetry, onStep } = {}) {
+  const out = cargoQueue.then(async () => {
+    if (onStep) onStep();
+    const result = await rawCargoQuery(params, { onRetry });
+    await sleep(CARGO_GAP_MS);
+    return result;
+  });
+  cargoQueue = out.catch(() => {});
+  return out;
+}
+
+async function rawCargoQuery(params, { onRetry } = {}) {
+  const qs = new URLSearchParams({
+    action: 'cargoquery', format: 'json', origin: '*', ...params,
+  }).toString();
+  const url = `${API}?${qs}`;
+  for (let attempt = 0; attempt <= RETRY_WAIT_MS.length; attempt++) {
+    if (attempt > 0) {
+      if (onRetry) onRetry(attempt, RETRY_WAIT_MS.length);
+      await sleep(RETRY_WAIT_MS[attempt - 1]);
     }
-    populateTournamentDropdown(gamesAll);
-    renderAll();
-    if (lastSpError) {
-      const msg = lastSpError instanceof RateLimitError
-        ? '⚠ ' + lastSpError.message
-        : '⚠ Picks par joueur indisponibles: ' + lastSpError.message;
-      setStatus(`${gamesAll.length} games OK. ` + msg, true);
-    } else {
-      setStatus(`${gamesAll.length} games · ${playersRows.length} player rows.`);
-    }
-  } catch (err) {
-    console.error(err);
-    setStatus('Erreur: ' + err.message, true);
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json().catch(() => ({}));
+    if (data.error && data.error.code === 'ratelimited') continue;
+    if (data.error) throw new Error(`Cargo [${data.error.code}]: ${data.error.info || ''}`);
+    return (data.cargoquery || []).map(x => x.title);
   }
+  throw new RateLimitError('Rate-limit Fandom persistant. Réessaie dans quelques minutes.');
+}
+
+// ----- import one day's games on demand -----
+
+async function onImportDay() {
+  const day = updateDateEl.value;
+  if (!day) { setUpdateStatus('Choisis une date.', 'err'); return; }
+
+  const blob = readBlob();
+  if (blob.importedDays.has(day)) {
+    setUpdateStatus(`Journée ${day} déjà importée. Rien à refetch.`, 'ok');
+    return;
+  }
+
+  updateBtnEl.disabled = true;
+  setUpdateStatus(`Recherche des games du ${day}…`);
+
+  const bump = (msg) => setUpdateStatus(msg);
+  const retryUi = (n, total) => setUpdateStatus(`Rate-limit — retry ${n}/${total}…`);
+
+  try {
+    // Step 1 — which games played that day? SG supports DateTime range WHERE.
+    // LFL matches are European evenings (18:00-24:00 UTC typically); widen the
+    // window to full day to be safe.
+    bump(`Étape 1/4 — ScoreboardGames ${day}…`);
+    const sgRows = await cargoQuery({
+      tables: 'ScoreboardGames',
+      fields: 'Team1,Team2,Winner,DateTime_UTC,GameId,OverviewPage',
+      where:
+        `OverviewPage LIKE "${SEASON_LIKE}" ` +
+        `AND DateTime_UTC >= "${day} 00:00:00" ` +
+        `AND DateTime_UTC < "${day} 23:59:59"`,
+      limit: '500',
+    }, { onRetry: retryUi });
+    if (!sgRows.length) {
+      blob.importedDays.add(day);
+      writeBlob(blob);
+      setUpdateStatus(`Aucune game trouvée pour ${day}.`, 'ok');
+      splitData = loadSplitData();
+      updateSyncInfo();
+      updateBtnEl.disabled = false;
+      return;
+    }
+
+    // Stages present this day — drives the picks/bans per-stage fetches.
+    const stages = [...new Set(sgRows.map(r => r.OverviewPage).filter(Boolean))];
+    const wantedGameIds = new Set(sgRows.map(r => r.GameId).filter(Boolean));
+
+    // Step 2+3 — picks + bans per stage, exact OverviewPage match.
+    const picksByGameId = {}, bansByGameId = {};
+    let step = 2;
+    for (const stage of stages) {
+      bump(`Étape ${step}/${2 + stages.length * 2} — picks ${stage.split('/').pop()}…`);
+      step++;
+      const picks = await cargoQuery({
+        tables: 'PicksAndBansS7',
+        fields: 'GameId,Team1Pick1,Team1Pick2,Team1Pick3,Team1Pick4,Team1Pick5,Team2Pick1,Team2Pick2,Team2Pick3,Team2Pick4,Team2Pick5',
+        where: `OverviewPage="${stage.replace(/"/g, '')}"`,
+        limit: '500',
+      }, { onRetry: retryUi });
+      for (const r of picks) {
+        if (wantedGameIds.has(r.GameId)) picksByGameId[r.GameId] = r;
+      }
+      bump(`Étape ${step}/${2 + stages.length * 2} — bans ${stage.split('/').pop()}…`);
+      step++;
+      const bans = await cargoQuery({
+        tables: 'PicksAndBansS7',
+        fields: 'GameId,Team1Ban1,Team1Ban2,Team1Ban3,Team1Ban4,Team1Ban5,Team2Ban1,Team2Ban2,Team2Ban3,Team2Ban4,Team2Ban5',
+        where: `OverviewPage="${stage.replace(/"/g, '')}"`,
+        limit: '500',
+      }, { onRetry: retryUi });
+      for (const r of bans) {
+        if (wantedGameIds.has(r.GameId)) bansByGameId[r.GameId] = r;
+      }
+    }
+
+    // Step final — SP rows for that day (single LIKE query, scoped to date).
+    bump(`Étape finale — ScoreboardPlayers ${day}…`);
+    const spRows = await cargoQuery({
+      tables: 'ScoreboardPlayers',
+      fields: 'Link,Champion,Role,Team,OverviewPage,GameId,DateTime_UTC',
+      where:
+        `OverviewPage LIKE "${SEASON_LIKE}" ` +
+        `AND DateTime_UTC >= "${day} 00:00:00" ` +
+        `AND DateTime_UTC < "${day} 23:59:59"`,
+      limit: '500',
+    }, { onRetry: retryUi });
+
+    // Shape new games the same way sync.py does.
+    const newGames = sgRows.map(sg => mapSgRow(sg, picksByGameId[sg.GameId] || {}, bansByGameId[sg.GameId] || {}))
+                           .filter(Boolean);
+
+    // Append to the localStorage blob (dedup by composite key).
+    const seenGameKeys = new Set(blob.games.map(gameKey));
+    const seenPlayerKeys = new Set(blob.players.map(playerKey));
+    const extraGames   = newGames.filter(g => !seenGameKeys.has(gameKey(g)));
+    const extraPlayers = spRows.filter(p => !seenPlayerKeys.has(playerKey(p)));
+    blob.games.push(...extraGames);
+    blob.players.push(...extraPlayers);
+    blob.importedDays.add(day);
+    blob.at = Date.now();
+    writeBlob(blob);
+
+    // Rebuild in-memory splitData and refresh the UI (teams dropdown, status).
+    splitData = loadSplitData();
+    populateTeams(splitData.teams);
+    updateSyncInfo();
+    setUpdateStatus(
+      `✓ ${day} : ${extraGames.length} games + ${extraPlayers.length} player rows importés.`,
+      'ok',
+    );
+    if (loadedTeam) onLoad();
+  } catch (err) {
+    console.error('import failed', err);
+    if (err instanceof RateLimitError) {
+      setUpdateStatus('⚠ Rate-limit Fandom persistant. Réessaie dans 1-2 min.', 'err');
+    } else {
+      setUpdateStatus(`⚠ Erreur : ${err.message}`, 'err');
+    }
+  } finally {
+    updateBtnEl.disabled = false;
+  }
+}
+
+function setUpdateStatus(msg, kind) {
+  updateStatusEl.textContent = msg || '';
+  updateStatusEl.className = kind === 'err' ? 'err' : kind === 'ok' ? 'ok' : '';
+}
+
+function triggerDownload(filename, content, mime) {
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Menu dispatcher for the "💾 Base locale → Gérer…" dropdown. Three
+// bulk actions on the single localStorage blob (all games + players
+// + the list of days already fetched).
+function onNavMenuAction(e) {
+  const action = e.target.value;
+  e.target.value = '';  // reset the dropdown back to the label
+  if (action === 'export') return exportNavToFile();
+  if (action === 'import') return $('#nav-import-file').click();
+  if (action === 'clear')  return clearNavData();
+}
+
+function exportNavToFile() {
+  const blob = readBlob();
+  const days = [...blob.importedDays].sort();
+  const snapshot = {
+    at: blob.at || Date.now(),
+    importedDays: days,
+    games: blob.games,
+    players: blob.players,
+  };
+  const stamp = new Date().toISOString().slice(0, 10);
+  const filename = `lfl-2026-nav-${stamp}.json`;
+  triggerDownload(filename, JSON.stringify(snapshot, null, 2) + '\n', 'application/json');
+  setUpdateStatus(
+    `✓ ${filename} — ${days.length} jour${days.length > 1 ? 's' : ''}, ${blob.games.length} games, ${blob.players.length} player rows.`,
+    'ok',
+  );
+}
+
+// Replace (not merge) the browser state with the file's contents. Export
+// → save → import roundtrips identically. To merge two files, re-import
+// day-by-day via the date picker.
+function onNavFileSelected(e) {
+  const file = e.target.files[0];
+  e.target.value = '';  // allow re-selecting the same filename
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      if (!data || !Array.isArray(data.games) || !Array.isArray(data.players)) {
+        throw new Error('format invalide (attendu { games, players, importedDays })');
+      }
+      writeBlob({
+        at: data.at || Date.now(),
+        importedDays: new Set(data.importedDays || []),
+        games: data.games,
+        players: data.players,
+      });
+      splitData = loadSplitData();
+      populateTeams(splitData.teams);
+      updateSyncInfo();
+      const dayCount = (data.importedDays || []).length;
+      setUpdateStatus(
+        `✓ Import : ${dayCount} jour${dayCount > 1 ? 's' : ''}, ${data.games.length} games, ${data.players.length} player rows.`,
+        'ok',
+      );
+      if (loadedTeam) onLoad();
+    } catch (err) {
+      setUpdateStatus(`⚠ Lecture échouée : ${err.message}`, 'err');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function clearNavData() {
+  const blob = readBlob();
+  const dayCount = blob.importedDays.size;
+  if (!blob.games.length && !dayCount) {
+    setUpdateStatus('Rien à vider — aucune donnée navigateur.', 'ok');
+    return;
+  }
+  const msg = `Supprimer toutes les données navigateur ? (${dayCount} jour${dayCount > 1 ? 's' : ''}, ${blob.games.length} games)`;
+  if (!confirm(msg)) return;
+  localStorage.removeItem(BLOB_KEY);
+  splitData = loadSplitData();
+  populateTeams(splitData.teams);
+  updateSyncInfo();
+  setUpdateStatus('✓ Base locale effacée.', 'ok');
+  clearOutput();
+  loadedTeam = '';
+}
+
+// Same shape as sync.py's map_draft_row — kept in lock-step with the
+// Python side so base games and imported games are indistinguishable in
+// the viewer.
+function mapSgRow(sg, picks, bans) {
+  const blue = sg.Team1 || '';
+  const red  = sg.Team2 || '';
+  if (!blue || !red) return null;
+  const winnerField = String(sg.Winner || '');
+  const winnerSide = winnerField === '1' ? 'B' : winnerField === '2' ? 'R' : null;
+  const dt = sg['DateTime UTC'] || sg.DateTime_UTC || '';
+  const overview = sg.OverviewPage || '';
+  const tournament = overview ? overview.split('/').pop() : '';
+  const slotMap = {};
+  for (let n = 1; n <= 5; n++) {
+    slotMap[`ban-B-${n}`]  = bans[`Team1Ban${n}`]  || '';
+    slotMap[`ban-R-${n}`]  = bans[`Team2Ban${n}`]  || '';
+    slotMap[`pick-B-${n}`] = picks[`Team1Pick${n}`] || '';
+    slotMap[`pick-R-${n}`] = picks[`Team2Pick${n}`] || '';
+  }
+  return {
+    date: dt.slice(0, 10),
+    tournament,
+    overviewPage: overview,
+    gameId: sg.GameId || '',
+    blueTeam: blue, redTeam: red,
+    team1: blue, team2: red, team1Side: 'B',
+    slotMap, winnerSide,
+  };
+}
+
+// ----- load: pure client-side filter on the local blob -----
+
+function onLoad() {
+  const team = (teamInputEl.value || teamSelectEl.value).trim();
+  if (!team) { setStatus('Choisis une équipe.', true); return; }
+  if (!splitData) { setStatus('Données pas encore chargées — attends la synchro ou clique ↻.', true); return; }
+  loadedTeam = team;
+  clearOutput();
+  gamesAll = (splitData.games || [])
+    .filter(g => g.blueTeam === team || g.redTeam === team)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  playersRows = (splitData.players || []).filter(p => p.Team === team);
+  if (!gamesAll.length) { setStatus(`Aucune game trouvée pour ${team}.`, true); return; }
+  populateTournamentDropdown(gamesAll);
+  renderAll();
+  setStatus(`${gamesAll.length} games · ${playersRows.length} player rows pour ${team}.`);
+}
+
+// ----- UI helpers -----
+
+function populateTeams(teams) {
+  if (!teams || !teams.length) {
+    teamSelectEl.innerHTML = '<option>(liste vide)</option>';
+    teamSelectEl.disabled = true;
+    return;
+  }
+  teamSelectEl.innerHTML = '<option value="">(choisir…)</option>' +
+    teams.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  teamSelectEl.disabled = false;
 }
 
 function clearOutput() {
@@ -324,6 +720,7 @@ function clearOutput() {
   $('#picks').innerHTML = '';
   $('#games-head').style.display = 'none';
   $('#picks-head').style.display = 'none';
+  $('#copy-all').style.display = 'none';
   tournamentEl.innerHTML = '<option>(charger d\'abord)</option>';
   tournamentEl.disabled = true;
 }
@@ -333,98 +730,47 @@ function setStatus(msg, isError) {
   statusEl.style.color = isError ? '#b32b2b' : '';
 }
 
-async function fetchPickBanHistory(team) {
-  const page = encodeURIComponent(team.replace(/ /g, '_') + '/Pick-Ban_History');
-  const url = `${API}?action=parse&page=${page}&prop=text&format=json&origin=*`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const data = await r.json();
-  if (data.error) throw new Error(data.error.info || 'API error');
-  if (!data.parse || !data.parse.text) throw new Error('Page introuvable');
-  return data.parse.text['*'];
+function setSyncStatus(msg) { syncInfoEl.textContent = msg; }
+
+function setSyncBarError(isError) {
+  syncBarEl.classList.toggle('error', !!isError);
 }
 
-class RateLimitError extends Error {
-  constructor(msg) { super(msg); this.name = 'RateLimitError'; }
+function setControlsDisabled(disabled) {
+  teamSelectEl.disabled = disabled;
+  tournamentEl.disabled = disabled;
+  teamInputEl.disabled = disabled;
+  loadBtnEl.disabled = disabled;
+  // The refresh button stays enabled even in disabled state so the user
+  // always has an escape hatch after a failed load.
+  syncBtnEl.disabled = false;
 }
 
-async function fetchScoreboardPlayers(team, overviewPages) {
-  const pageClause = (overviewPages && overviewPages.length)
-    ? ' AND (' + overviewPages.map(p => `OverviewPage="${p.replace(/"/g, '')}"`).join(' OR ') + ')'
-    : '';
-  const where = encodeURIComponent(`Team="${team}"` + pageClause);
-  const fields = encodeURIComponent('Link,Champion,Role,Team,OverviewPage,GameId,DateTime_UTC');
-  const url = `${API}?action=cargoquery&tables=ScoreboardPlayers&fields=${fields}&where=${where}&limit=500&format=json&origin=*`;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    setStatus(`Fetching player-picks (tentative ${attempt + 1}/3)...`);
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`ScoreboardPlayers HTTP ${r.status}`);
-    const data = await r.json().catch(() => ({}));
-    if (data.error && data.error.code === 'ratelimited') {
-      const wait = 2000 * (attempt + 1);
-      await new Promise(res => setTimeout(res, wait));
-      continue;
-    }
-    if (data.error) throw new Error(data.error.info || 'Erreur API ScoreboardPlayers');
-    return (data.cargoquery || []).map(x => x.title);
+function updateSyncInfo() {
+  if (!splitData || !splitData.games.length) {
+    setSyncStatus(`${SEASON_LABEL} — aucune donnée locale.`);
+    return;
   }
-  throw new RateLimitError("Rate-limit Fandom persistant sur ScoreboardPlayers après 3 tentatives. Les drafts sont OK, mais l'agrégat des picks par joueur reste vide — recharge dans ~1 min pour réessayer.");
+  const age = splitData.at ? formatAge(Date.now() - splitData.at) : 'inconnu';
+  const dayCount = splitData.importedDays ? splitData.importedDays.size : 0;
+  const daySuffix = dayCount ? ` · ${dayCount} jour${dayCount > 1 ? 's' : ''} importé${dayCount > 1 ? 's' : ''}` : '';
+  setSyncStatus(
+    `${SEASON_LABEL} — maj ${age} · ${splitData.games.length} games, ${splitData.players.length} player rows${daySuffix}`,
+  );
 }
 
-function parsePickBanTable(htmlStr) {
-  const doc = new DOMParser().parseFromString(htmlStr, 'text/html');
-  const table = doc.getElementById('pbh-table');
-  if (!table) return [];
-  const rows = Array.from(table.querySelectorAll('tr')).slice(2);
-  const games = [];
-  for (const tr of rows) {
-    const tds = tr.querySelectorAll('td');
-    if (tds.length < 10) continue;
-    const date = text(tds[0]);
-    const tournament = text(tds[1]);
-    const phase = text(tds[2]);
-    // Extract the OverviewPage from the Phase link's href (e.g.
-    // "/wiki/LFL/2026_Season/Spring_Split/Picks_and_Bans/Individual_Games#Week_2"
-    // → "LFL/2026 Season/Spring Split"). Used to match ScoreboardPlayers rows.
-    let overviewPage = '';
-    const phaseLink = tds[2].querySelector('a[href*="/Picks_and_Bans/"]');
-    if (phaseLink) {
-      const href = phaseLink.getAttribute('href') || '';
-      const m = href.match(/\/wiki\/(.+?)\/Picks_and_Bans\//);
-      if (m) overviewPage = decodeURIComponent(m[1]).replace(/_/g, ' ');
-    }
-    const team1 = tds[3].getAttribute('title') || '?';
-    const team2 = tds[4].getAttribute('title') || '?';
-    const team1Side = tds[3].classList.contains('pbh-blue') ? 'B' : 'R';
-    const team2Side = tds[4].classList.contains('pbh-blue') ? 'B' : 'R';
-    const score = text(tds[5]);
-    const result = text(tds[6]);
-    const patch = text(tds[7]);
-    const champs = [];
-    for (const td of tds) {
-      const c1 = td.getAttribute('data-c1');
-      const c2 = td.getAttribute('data-c2');
-      if (c1) champs.push(c1);
-      if (c2) champs.push(c2);
-    }
-    if (champs.length !== DRAFT_SEQUENCE.length) continue;
-    // Build lookup: "kind-side-n" -> champion
-    const slotMap = {};
-    DRAFT_SEQUENCE.forEach((s, i) => {
-      slotMap[`${s.kind}-${s.side}-${s.n}`] = champs[i];
-    });
-    let winnerSide = null;
-    if (result === 'Win')  winnerSide = team1Side;
-    if (result === 'Loss') winnerSide = team2Side;
-    const blueTeam = team1Side === 'B' ? team1 : team2;
-    const redTeam  = team1Side === 'B' ? team2 : team1;
-    games.push({ date, tournament, phase, overviewPage, team1, team2, team1Side,
-                 blueTeam, redTeam, score, result, patch, slotMap, winnerSide });
-  }
-  return games;
+function formatAge(ms) {
+  if (!ms || ms < 0) return "à l'instant";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "à l'instant";
+  if (mins < 60) return `il y a ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return `il y a ${days} j`;
 }
 
-function text(el) { return (el.textContent || '').trim(); }
+// ----- rendering -----
 
 function populateTournamentDropdown(games) {
   const tournaments = Array.from(new Set(games.map(g => g.tournament))).filter(Boolean);
@@ -617,13 +963,7 @@ function renderAggregate(games) {
     return allowedDates.has(raw.slice(0, 10));
   });
   if (!rows.length) {
-    if (lastSpError instanceof RateLimitError) {
-      wrap.innerHTML = '<p class="copy-hint" style="color:#b32b2b;font-weight:bold">⚠ Rate-limit Fandom sur ScoreboardPlayers. Patiente ~1 min puis clique "Charger" à nouveau.</p>';
-    } else if (lastSpError) {
-      wrap.innerHTML = '<p class="copy-hint" style="color:#b32b2b">⚠ Erreur fetch picks: ' + esc(lastSpError.message) + '</p>';
-    } else {
-      wrap.innerHTML = '<p class="copy-hint">Pas de données joueur pour ce filtre (SP table vide côté Fandom).</p>';
-    }
+    wrap.innerHTML = '<p class="copy-hint">Pas de données joueur pour ce filtre.</p>';
     return;
   }
   // Group by Role -> by Player -> counts of Champion

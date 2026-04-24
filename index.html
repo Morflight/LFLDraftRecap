@@ -122,6 +122,8 @@
       <select id="tournament" disabled><option>(charger d'abord)</option></select>
     </label>
     <button id="load">Charger</button>
+    <button id="refresh-cache" type="button"
+      title="Vider le cache local (équipes + drafts + picks) et recharger la liste d'équipes">↻ Rafraîchir</button>
   </div>
 
   <div id="status"></div>
@@ -175,24 +177,12 @@ const LAYOUT = [
   { blue:null,              red:{kind:'pick',n:5} },
 ];
 
-// Standard competitive draft sequence — 20 slots in chronological order.
-// Used to index data-c1/data-c2 champions from the pbh-table row.
-const DRAFT_SEQUENCE = [
-  {kind:'ban', side:'B', n:1}, {kind:'ban', side:'R', n:1},
-  {kind:'ban', side:'B', n:2}, {kind:'ban', side:'R', n:2},
-  {kind:'ban', side:'B', n:3}, {kind:'ban', side:'R', n:3},
-  {kind:'pick',side:'B', n:1}, {kind:'pick',side:'R', n:1},
-  {kind:'pick',side:'R', n:2}, {kind:'pick',side:'B', n:2},
-  {kind:'pick',side:'B', n:3}, {kind:'pick',side:'R', n:3},
-  {kind:'ban', side:'R', n:4}, {kind:'ban', side:'B', n:4},
-  {kind:'ban', side:'R', n:5}, {kind:'ban', side:'B', n:5},
-  {kind:'pick',side:'R', n:4}, {kind:'pick',side:'B', n:4},
-  {kind:'pick',side:'B', n:5}, {kind:'pick',side:'R', n:5},
-];
-
 const ROLE_ORDER = ['Top', 'Jungle', 'Mid', 'Bot', 'Support'];
 
 const CURRENT_SPLIT = 'LFL/2026 Season/Spring Split';
+// LIKE pattern for draft + player-pick queries — rolls Spring Playoffs
+// into the same cache alongside the regular-season OverviewPage.
+const CURRENT_SCOPE_LIKE = 'LFL/2026 Season/Spring%';
 
 const $ = (s) => document.querySelector(s);
 const statusEl = $('#status');
@@ -209,9 +199,10 @@ $('#load').addEventListener('click', onLoad);
 tournamentEl.addEventListener('change', renderAll);
 teamSelectEl.addEventListener('change', () => { teamInputEl.value = teamSelectEl.value; });
 $('#copy-all').addEventListener('click', (e) => copyAll(e.currentTarget));
+$('#refresh-cache').addEventListener('click', onRefreshCache);
 
-const TEAMS_CACHE_KEY = 'lfl-draft-recap:teams:' + CURRENT_SPLIT;
-const TEAMS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const CACHE_PREFIX = 'lfl-draft-recap:';
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 function populateTeams(teams) {
   if (!teams || !teams.length) {
@@ -223,56 +214,81 @@ function populateTeams(teams) {
   teamSelectEl.disabled = false;
 }
 
-function readTeamsCache() {
+function readCache(key) {
   try {
-    const raw = localStorage.getItem(TEAMS_CACHE_KEY);
+    const raw = localStorage.getItem(CACHE_PREFIX + key);
     if (!raw) return null;
-    const { at, teams } = JSON.parse(raw);
-    if (Date.now() - at > TEAMS_CACHE_TTL_MS) return null;
-    return teams;
+    const { at, data } = JSON.parse(raw);
+    if (Date.now() - at > CACHE_TTL_MS) return null;
+    return data;
   } catch { return null; }
 }
-function writeTeamsCache(teams) {
+function writeCache(key, data) {
   try {
-    localStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify({ at: Date.now(), teams }));
+    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ at: Date.now(), data }));
+  } catch {}
+}
+function clearCaches() {
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith(CACHE_PREFIX)) localStorage.removeItem(k);
+    }
   } catch {}
 }
 
-async function fetchTeamsList() {
-  // Try TournamentRosters first, fall back to distinct teams from ScoreboardGames.
-  const base = `${API}?action=cargoquery&format=json&origin=*`;
-  const where = encodeURIComponent(`OverviewPage="${CURRENT_SPLIT}"`);
-  const tryUrl = async (url) => {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const r = await fetch(url);
-      const data = await r.json().catch(() => ({}));
-      if (data.error && data.error.code === 'ratelimited') {
-        await new Promise(res => setTimeout(res, 1500 * (attempt + 1)));
-        continue;
-      }
-      return data.cargoquery || [];
+class RateLimitError extends Error {
+  constructor(msg) { super(msg); this.name = 'RateLimitError'; }
+}
+
+// Thin wrapper around Fandom's Cargo API. Retries on `ratelimited` errors
+// with linear backoff (2s, 4s, 6s) and throws RateLimitError after the
+// retries are exhausted. `onRetry(n, total)` fires per retry for status UI.
+async function cargoQuery(params, { retries = 3, onRetry } = {}) {
+  const qs = new URLSearchParams({
+    action: 'cargoquery', format: 'json', origin: '*', ...params,
+  }).toString();
+  const url = `${API}?${qs}`;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json().catch(() => ({}));
+    if (data.error && data.error.code === 'ratelimited') {
+      if (onRetry) onRetry(attempt + 1, retries);
+      await new Promise(res => setTimeout(res, 2000 * (attempt + 1)));
+      continue;
     }
-    throw new Error('rate-limit persistant');
-  };
-  const rosters = await tryUrl(`${base}&tables=TournamentRosters&fields=Team&where=${where}`);
-  let teams = rosters.map(x => x.title.Team).filter(Boolean);
+    if (data.error) throw new Error(data.error.info || 'Erreur Cargo');
+    return (data.cargoquery || []).map(x => x.title);
+  }
+  throw new RateLimitError('Rate-limit Fandom persistant. Patiente ~1 min puis réessaie.');
+}
+
+async function fetchTeamsList() {
+  // TournamentRosters is the canonical split roster; fall back to distinct
+  // teams from ScoreboardGames if rosters aren't published yet.
+  const where = `OverviewPage="${CURRENT_SPLIT}"`;
+  const rosters = await cargoQuery({ tables: 'TournamentRosters', fields: 'Team', where });
+  let teams = rosters.map(x => x.Team).filter(Boolean);
   if (!teams.length) {
-    const games = await tryUrl(`${base}&tables=ScoreboardGames&fields=Team1,Team2&where=${where}&limit=200`);
+    const games = await cargoQuery({
+      tables: 'ScoreboardGames', fields: 'Team1,Team2', where, limit: '200',
+    });
     const set = new Set();
-    for (const g of games) { if (g.title.Team1) set.add(g.title.Team1); if (g.title.Team2) set.add(g.title.Team2); }
+    for (const g of games) { if (g.Team1) set.add(g.Team1); if (g.Team2) set.add(g.Team2); }
     teams = Array.from(set);
   }
   return Array.from(new Set(teams)).sort();
 }
 
 (async function initTeams() {
-  const cached = readTeamsCache();
+  const cacheKey = 'teams:' + CURRENT_SPLIT;
+  const cached = readCache(cacheKey);
   if (cached) populateTeams(cached);
   else teamSelectEl.innerHTML = '<option>(chargement...)</option>';
   try {
     const teams = await fetchTeamsList();
     if (teams.length) {
-      writeTeamsCache(teams);
+      writeCache(cacheKey, teams);
       populateTeams(teams);
     } else if (!cached) {
       teamSelectEl.innerHTML = '<option>(aucune équipe — Fandom vide pour ' + esc(CURRENT_SPLIT) + ')</option>';
@@ -283,6 +299,25 @@ async function fetchTeamsList() {
   }
 })();
 
+async function onRefreshCache() {
+  clearCaches();
+  setStatus('Cache vidé. Rechargement de la liste des équipes...');
+  teamSelectEl.innerHTML = '<option>(rechargement...)</option>';
+  teamSelectEl.disabled = true;
+  try {
+    const teams = await fetchTeamsList();
+    if (teams.length) {
+      writeCache('teams:' + CURRENT_SPLIT, teams);
+      populateTeams(teams);
+      setStatus('Cache vidé. Liste rechargée — clique "Charger" pour refetch les drafts et picks.');
+    } else {
+      setStatus('Cache vidé, mais liste des équipes vide.', true);
+    }
+  } catch (e) {
+    setStatus('Cache vidé. Erreur rechargement liste: ' + e.message, true);
+  }
+}
+
 async function onLoad() {
   const team = (teamInputEl.value || teamSelectEl.value).trim();
   if (!team) { setStatus("Choisis une équipe ou entre un nom.", true); return; }
@@ -291,13 +326,12 @@ async function onLoad() {
   clearOutput();
   lastSpError = null;
   try {
-    const html = await fetchPickBanHistory(team);
-    gamesAll = parsePickBanTable(html);
+    gamesAll = await fetchDraftsFromCargo(team);
     if (!gamesAll.length) { setStatus('Aucune game trouvée.', true); return; }
     setStatus(`${gamesAll.length} games chargées. Fetching player-picks...`);
-    const pages = Array.from(new Set(gamesAll.map(g => g.overviewPage).filter(Boolean)));
     try {
-      playersRows = await fetchScoreboardPlayers(team, pages);
+      const allSp = await fetchAllScoreboardPlayersForSplit();
+      playersRows = allSp.filter(r => r.Team === team);
     } catch (err) {
       playersRows = [];
       lastSpError = err;
@@ -333,98 +367,99 @@ function setStatus(msg, isError) {
   statusEl.style.color = isError ? '#b32b2b' : '';
 }
 
-async function fetchPickBanHistory(team) {
-  const page = encodeURIComponent(team.replace(/ /g, '_') + '/Pick-Ban_History');
-  const url = `${API}?action=parse&page=${page}&prop=text&format=json&origin=*`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const data = await r.json();
-  if (data.error) throw new Error(data.error.info || 'API error');
-  if (!data.parse || !data.parse.text) throw new Error('Page introuvable');
-  return data.parse.text['*'];
-}
-
-class RateLimitError extends Error {
-  constructor(msg) { super(msg); this.name = 'RateLimitError'; }
-}
-
-async function fetchScoreboardPlayers(team, overviewPages) {
-  const pageClause = (overviewPages && overviewPages.length)
-    ? ' AND (' + overviewPages.map(p => `OverviewPage="${p.replace(/"/g, '')}"`).join(' OR ') + ')'
-    : '';
-  const where = encodeURIComponent(`Team="${team}"` + pageClause);
-  const fields = encodeURIComponent('Link,Champion,Role,Team,OverviewPage,GameId,DateTime_UTC');
-  const url = `${API}?action=cargoquery&tables=ScoreboardPlayers&fields=${fields}&where=${where}&limit=500&format=json&origin=*`;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    setStatus(`Fetching player-picks (tentative ${attempt + 1}/3)...`);
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`ScoreboardPlayers HTTP ${r.status}`);
-    const data = await r.json().catch(() => ({}));
-    if (data.error && data.error.code === 'ratelimited') {
-      const wait = 2000 * (attempt + 1);
-      await new Promise(res => setTimeout(res, wait));
-      continue;
-    }
-    if (data.error) throw new Error(data.error.info || 'Erreur API ScoreboardPlayers');
-    return (data.cargoquery || []).map(x => x.title);
-  }
-  throw new RateLimitError("Rate-limit Fandom persistant sur ScoreboardPlayers après 3 tentatives. Les drafts sont OK, mais l'agrégat des picks par joueur reste vide — recharge dans ~1 min pour réessayer.");
-}
-
-function parsePickBanTable(htmlStr) {
-  const doc = new DOMParser().parseFromString(htmlStr, 'text/html');
-  const table = doc.getElementById('pbh-table');
-  if (!table) return [];
-  const rows = Array.from(table.querySelectorAll('tr')).slice(2);
-  const games = [];
-  for (const tr of rows) {
-    const tds = tr.querySelectorAll('td');
-    if (tds.length < 10) continue;
-    const date = text(tds[0]);
-    const tournament = text(tds[1]);
-    const phase = text(tds[2]);
-    // Extract the OverviewPage from the Phase link's href (e.g.
-    // "/wiki/LFL/2026_Season/Spring_Split/Picks_and_Bans/Individual_Games#Week_2"
-    // → "LFL/2026 Season/Spring Split"). Used to match ScoreboardPlayers rows.
-    let overviewPage = '';
-    const phaseLink = tds[2].querySelector('a[href*="/Picks_and_Bans/"]');
-    if (phaseLink) {
-      const href = phaseLink.getAttribute('href') || '';
-      const m = href.match(/\/wiki\/(.+?)\/Picks_and_Bans\//);
-      if (m) overviewPage = decodeURIComponent(m[1]).replace(/_/g, ' ');
-    }
-    const team1 = tds[3].getAttribute('title') || '?';
-    const team2 = tds[4].getAttribute('title') || '?';
-    const team1Side = tds[3].classList.contains('pbh-blue') ? 'B' : 'R';
-    const team2Side = tds[4].classList.contains('pbh-blue') ? 'B' : 'R';
-    const score = text(tds[5]);
-    const result = text(tds[6]);
-    const patch = text(tds[7]);
-    const champs = [];
-    for (const td of tds) {
-      const c1 = td.getAttribute('data-c1');
-      const c2 = td.getAttribute('data-c2');
-      if (c1) champs.push(c1);
-      if (c2) champs.push(c2);
-    }
-    if (champs.length !== DRAFT_SEQUENCE.length) continue;
-    // Build lookup: "kind-side-n" -> champion
-    const slotMap = {};
-    DRAFT_SEQUENCE.forEach((s, i) => {
-      slotMap[`${s.kind}-${s.side}-${s.n}`] = champs[i];
-    });
-    let winnerSide = null;
-    if (result === 'Win')  winnerSide = team1Side;
-    if (result === 'Loss') winnerSide = team2Side;
-    const blueTeam = team1Side === 'B' ? team1 : team2;
-    const redTeam  = team1Side === 'B' ? team2 : team1;
-    games.push({ date, tournament, phase, overviewPage, team1, team2, team1Side,
-                 blueTeam, redTeam, score, result, patch, slotMap, winnerSide });
-  }
+// Fetch a team's games from PicksAndBansS7 (structured pick/ban data in JSON).
+// Replaces the old action=parse HTML scrape of the team's Pick-Ban_History
+// page, which was the single most expensive call on this tool — MediaWiki
+// re-rendered the whole wiki page on each request. Cached per team for 24h.
+async function fetchDraftsFromCargo(team) {
+  const cacheKey = `drafts:${CURRENT_SPLIT}:${team}`;
+  const cached = readCache(cacheKey);
+  if (cached) return cached;
+  const teamEsc = team.replace(/"/g, '');
+  const where =
+    `(Team1="${teamEsc}" OR Team2="${teamEsc}") ` +
+    `AND OverviewPage LIKE "${CURRENT_SCOPE_LIKE}"`;
+  const fields = [
+    'Team1','Team2','Winner','Tournament','OverviewPage','GameId','DateTime_UTC','Phase','Patch',
+    'Team1Ban1','Team1Ban2','Team1Ban3','Team1Ban4','Team1Ban5',
+    'Team2Ban1','Team2Ban2','Team2Ban3','Team2Ban4','Team2Ban5',
+    'Team1Pick1','Team1Pick2','Team1Pick3','Team1Pick4','Team1Pick5',
+    'Team2Pick1','Team2Pick2','Team2Pick3','Team2Pick4','Team2Pick5',
+  ].join(',');
+  const rows = await cargoQuery({
+    tables: 'PicksAndBansS7',
+    fields,
+    where,
+    limit: '500',
+    order_by: 'DateTime_UTC ASC',
+  }, { onRetry: (n, total) => setStatus(`Fetching drafts (tentative ${n}/${total})...`) });
+  const games = rows.map(mapDraftRow).filter(Boolean);
+  writeCache(cacheKey, games);
   return games;
 }
 
-function text(el) { return (el.textContent || '').trim(); }
+// PicksAndBansS7 convention: Team1 = Blue side, Team2 = Red side, Winner = 1|2.
+function mapDraftRow(r) {
+  const blueTeam = r.Team1 || '';
+  const redTeam  = r.Team2 || '';
+  if (!blueTeam || !redTeam) return null;
+  const hasPicks = [1,2,3,4,5].some(n => r[`Team1Pick${n}`] || r[`Team2Pick${n}`]);
+  if (!hasPicks) return null; // skip forfeits / empty rows
+  const winnerField = String(r.Winner || '');
+  const winnerSide = winnerField === '1' ? 'B' : winnerField === '2' ? 'R' : null;
+  const slotMap = {};
+  for (let n = 1; n <= 5; n++) {
+    slotMap[`ban-B-${n}`]  = r[`Team1Ban${n}`]  || '';
+    slotMap[`ban-R-${n}`]  = r[`Team2Ban${n}`]  || '';
+    slotMap[`pick-B-${n}`] = r[`Team1Pick${n}`] || '';
+    slotMap[`pick-R-${n}`] = r[`Team2Pick${n}`] || '';
+  }
+  const dt = r['DateTime UTC'] || r.DateTime_UTC || '';
+  return {
+    date: dt.slice(0, 10),
+    tournament: r.Tournament || r.OverviewPage || '',
+    phase: r.Phase || '',
+    overviewPage: r.OverviewPage || '',
+    blueTeam,
+    redTeam,
+    team1: blueTeam,
+    team2: redTeam,
+    team1Side: 'B',
+    slotMap,
+    winnerSide,
+  };
+}
+
+// One split-wide fetch for every ScoreboardPlayers row, cached 24h. Team
+// switching is then free (zero API calls) since every team's rows live in the
+// same local blob. Pages through 500-row windows until Cargo returns empty.
+async function fetchAllScoreboardPlayersForSplit() {
+  const cacheKey = `sp:${CURRENT_SPLIT}`;
+  const cached = readCache(cacheKey);
+  if (cached) return cached;
+  const where = `OverviewPage LIKE "${CURRENT_SCOPE_LIKE}"`;
+  const fields = 'Link,Champion,Role,Team,OverviewPage,GameId,DateTime_UTC';
+  const pageSize = 500;
+  const all = [];
+  for (let offset = 0; offset < 20000; offset += pageSize) {
+    const rows = await cargoQuery({
+      tables: 'ScoreboardPlayers',
+      fields,
+      where,
+      limit: String(pageSize),
+      offset: String(offset),
+      order_by: 'DateTime_UTC ASC',
+    }, {
+      onRetry: (n, total) =>
+        setStatus(`Fetching player-picks (offset ${offset}, tentative ${n}/${total})...`),
+    });
+    if (!rows.length) break;
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  writeCache(cacheKey, all);
+  return all;
+}
 
 function populateTournamentDropdown(games) {
   const tournaments = Array.from(new Set(games.map(g => g.tournament))).filter(Boolean);
